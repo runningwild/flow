@@ -40,23 +40,16 @@
                 "port": 19001,
                 "protocol": "tcp"
             }
-        ],
-        "mountPoints": [
-            {
-                "name": "db",
-                "path": "/db",
-                "readOnly": false
-            }
         ]
     },
     "annotations": [
         {
-            "name": "required-flag=process-addr",
-            "value": "type=host-port"
+            "name": "required-flag/process-addr",
+            "value": "name=process-addr;type=host-port"
         },
         {
-            "name": "required-flag=store-addr",
-            "value": "type=host-port"
+            "name": "required-flag/store-addr",
+            "value": "name=store-addr;type=host-port"
         }
     ]
 }
