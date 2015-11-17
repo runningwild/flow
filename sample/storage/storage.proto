@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package storage;
+
+service KeyVal{
+	rpc Put(PutRequest) returns (PutReply) {}
+	rpc Get(GetRequest) returns (GetReply) {}
+	rpc Range(RangeRequest) returns (RangeReply) {}
+}
+
+message PutRequest {
+	Element element = 1;
+}
+message PutReply {
+}
+
+message GetRequest {
+	string key = 1;
+}
+message GetReply {
+	Element element = 1;
+}
+
+message RangeRequest {
+	string prefix = 1;
+	string start = 2;
+	int32 count = 3;
+}
+message RangeReply {
+	repeated Element elements = 1;
+}
+
+message Element {
+	string key = 1;
+	string val = 2;
+}

@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package processor;
+
+service Process{
+	rpc Process(ProcessRequest) returns (ProcessReply) {}
+}
+
+message ProcessRequest {
+	string image = 1;
+}
+message ProcessReply {
+	string id = 2;
+}
