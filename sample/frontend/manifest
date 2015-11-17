@@ -1,0 +1,62 @@
+{
+    "acKind": "ImageManifest",
+    "acVersion": "0.5.1",
+    "name": "rocketpack.io/flow/frontend",
+    "labels": [
+        {
+            "name": "version",
+            "value": "0.0.1"
+        },
+        {
+            "name": "arch",
+            "value": "amd64"
+        },
+        {
+            "name": "os",
+            "value": "linux"
+        }
+    ],
+    "dependencies": [
+        {
+            "imageName": "rocketpack.io/golibs",
+            "labels": [
+                {
+                    "name": "version",
+                    "value": "0.0.1"
+                }
+            ]
+        }
+    ],
+    "app": {
+        "user": "root",
+        "group": "root",
+        "exec": [
+            "/bin/frontend",
+            "--port=19001"
+        ],
+        "ports": [
+            {
+                "name": "service",
+                "port": 19001,
+                "protocol": "tcp"
+            }
+        ],
+        "mountPoints": [
+            {
+                "name": "db",
+                "path": "/db",
+                "readOnly": false
+            }
+        ]
+    },
+    "annotations": [
+        {
+            "name": "required-flag=process-addr",
+            "value": "type=host-port"
+        },
+        {
+            "name": "required-flag=store-addr",
+            "value": "type=host-port"
+        }
+    ]
+}
