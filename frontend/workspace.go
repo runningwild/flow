@@ -14,6 +14,8 @@ type Workspace struct {
 	canvas, ctx  *js.Object
 	x, y, dx, dy int
 	images       chan schema.ImageManifest
+	disks        chan string
+	ingresses    chan int
 	draw         chan struct{}
 	mouseDown    chan point
 	mouseMove    chan point
@@ -23,9 +25,6 @@ type Workspace struct {
 func MakeWorkspace(canvas *js.Object) *Workspace {
 	doc := js.Global.Get("document")
 	ctx := canvas.Call("getContext", "2d")
-	// canvas.Set("font-kerning", "normal")
-	// canvas.Set("text-rendering", "optimizeLegibility")
-	// js.Global.Call("alert", fmt.Sprintf("%q %q", canvas.Get("font-kerning").String(), canvas.Get("text-rendering").String()))
 	w := &Workspace{
 		doc:       doc,
 		canvas:    canvas,
@@ -35,6 +34,8 @@ func MakeWorkspace(canvas *js.Object) *Workspace {
 		dx:        canvas.Get("offsetWidth").Int(),
 		dy:        canvas.Get("offsetHeight").Int(),
 		images:    make(chan schema.ImageManifest),
+		disks:     make(chan string),
+		ingresses: make(chan int),
 		draw:      make(chan struct{}),
 		mouseDown: make(chan point),
 		mouseMove: make(chan point),
@@ -57,8 +58,22 @@ func (w *Workspace) run() {
 		case im := <-w.images:
 			state.pods = append(state.pods, MakePod(&im, w.ctx))
 
+		case disk := <-w.disks:
+			state.pods = append(state.pods, MakeDisk(disk, w.ctx))
+
+		case port := <-w.ingresses:
+			state.pods = append(state.pods, MakeIngress(port, w.ctx))
+
 		case pt := <-w.mouseDown:
 			for i := range state.pods {
+				anch := state.pods[i].AnchorAt(pt)
+				if anch != nil {
+					state.connect = &edge{
+						src:  anch,
+						temp: pt,
+					}
+					break
+				}
 				if state.pods[i].Contains(pt) {
 					pods := []*pod{state.pods[i]}
 					for j := range state.pods {
@@ -76,23 +91,80 @@ func (w *Workspace) run() {
 			if len(state.pods) > 0 && state.pods[0].selected {
 				state.pods[0].Move(pt)
 			}
+			if state.connect != nil {
+				state.connect.temp = pt
+			}
 
 		case pt := <-w.mouseUp:
 			if len(state.pods) > 0 && state.pods[0].selected {
 				state.pods[0].Release(pt)
 			}
-
+			if state.connect != nil {
+				for i := range state.pods {
+					anch := state.pods[i].AnchorAt(pt)
+					if anch != nil {
+						state.connect.dst = anch
+						state.connect.complete = true
+						if state.connect.Valid() {
+							state.edges = append(state.edges, state.connect)
+						}
+						break
+					}
+				}
+				state.connect = nil
+			}
 		}
 		w.doDraw(&state)
 	}
 }
 
 type workspaceState struct {
-	pods []*pod
+	pods  []*pod
+	edges []*edge
+
+	connect *edge
+}
+
+type edge struct {
+	src, dst *podAnchor
+	temp     point
+	complete bool
+}
+
+func (e *edge) Valid() bool {
+	if !e.complete {
+		return false
+	}
+	if e.src == nil || e.dst == nil {
+		return false
+	}
+
+	if rf, ok := e.src.obj.(*requiredFlag); ok {
+		if rf.typ == "host-port" {
+			_, ok := e.dst.obj.(*types.Port)
+			return ok
+		}
+	}
+
+	if _, ok := e.src.obj.(portObj); ok {
+		_, ok := e.dst.obj.(*types.Port)
+		return ok
+	}
+
+	if _, ok := e.src.obj.(*types.MountPoint); ok {
+		_, ok := e.dst.obj.(diskObj)
+		return ok
+	}
+
+	return false
 }
 
 type pod struct {
-	manifest     *schema.ImageManifest
+	// Exactly one of the following should be non-zero
+	manifest *schema.ImageManifest
+	disk     string
+	port     int
+
 	selected     bool
 	x, y, dx, dy int
 
@@ -103,11 +175,19 @@ type pod struct {
 }
 
 type podAnchor struct {
+	pod    *pod
 	edgePt point
 	textPt point
 	text   string
 	obj    interface{}
+	// App.Ports
+	// App.MountPoints
+	// requiredFlag
+	// diskObj
+	// portObj
 }
+type diskObj string
+type portObj int
 
 var requiredFlagNameRe = regexp.MustCompile(`required-flag/(.*)`)
 var requiredFlagValueRe = regexp.MustCompile(`name=(.*);type=(.*)`)
@@ -127,6 +207,10 @@ func annotationToRequiredFlag(ann types.Annotation) *requiredFlag {
 	if len(value) == 0 {
 		return nil
 	}
+	if value[2] != "host-port" {
+		SetToast(ToastError, fmt.Sprintf("Unknown required-flag type %q", value[2]))
+		return nil
+	}
 	return &requiredFlag{
 		name: name[1],
 		flag: value[1],
@@ -142,11 +226,12 @@ func MakePod(manifest *schema.ImageManifest, ctx *js.Object) *pod {
 		manifest: manifest,
 		x:        10,
 		y:        10,
-		dy:       125,
+		dy:       75,
 	}
 
 	ctx.Set("fillStyle", "rgb(0, 0, 0)")
 	ctx.Set("textAlign", "center")
+	ctx.Set("textBaseline", "middle")
 	ctx.Set("font", "20px Monaco")
 
 	imageNameWidth := ctx.Call("measureText", p.manifest.Name.String()).Get("width").Int()
@@ -155,8 +240,9 @@ func MakePod(manifest *schema.ImageManifest, ctx *js.Object) *pod {
 
 	for _, port := range p.manifest.App.Ports {
 		topAnchors = append(topAnchors, &podAnchor{
+			pod:    p,
 			edgePt: point{0, 0},
-			textPt: point{0, 0 + 20},
+			textPt: point{0, 0 + 12},
 			text:   fmt.Sprintf("%s:%d", port.Name.String(), port.Port),
 			obj:    &port,
 		})
@@ -164,8 +250,9 @@ func MakePod(manifest *schema.ImageManifest, ctx *js.Object) *pod {
 
 	for _, mount := range p.manifest.App.MountPoints {
 		botAnchors = append(botAnchors, &podAnchor{
+			pod:    p,
 			edgePt: point{0, p.dy},
-			textPt: point{0, p.dy - 20},
+			textPt: point{0, p.dy - 12},
 			text:   mount.Name.String(),
 			obj:    &mount,
 		})
@@ -174,8 +261,9 @@ func MakePod(manifest *schema.ImageManifest, ctx *js.Object) *pod {
 		r := annotationToRequiredFlag(ann)
 		if r != nil {
 			botAnchors = append(botAnchors, &podAnchor{
+				pod:    p,
 				edgePt: point{0, p.dy},
-				textPt: point{0, p.dy - 20},
+				textPt: point{0, p.dy - 12},
 				text:   r.name,
 				obj:    r,
 			})
@@ -220,6 +308,44 @@ func MakePod(manifest *schema.ImageManifest, ctx *js.Object) *pod {
 	return p
 }
 
+func MakeDisk(name string, ctx *js.Object) *pod {
+	p := &pod{
+		disk: name,
+		x:    10,
+		y:    10,
+		dx:   100,
+		dy:   100,
+	}
+	p.anchors = append(p.anchors, &podAnchor{
+		pod:    p,
+		text:   "",
+		edgePt: point{50, 0},
+		textPt: point{50, 12},
+		obj:    diskObj(name),
+	})
+
+	return p
+}
+
+func MakeIngress(port int, ctx *js.Object) *pod {
+	p := &pod{
+		port: port,
+		x:    10,
+		y:    10,
+		dx:   100,
+		dy:   100,
+	}
+	p.anchors = append(p.anchors, &podAnchor{
+		pod:    p,
+		text:   "",
+		edgePt: point{50, 100},
+		textPt: point{50, 100 - 12},
+		obj:    portObj(port),
+	})
+
+	return p
+}
+
 func (p *pod) Click(pt point) {
 	p.drag = pt
 	p.origin = point{p.x, p.y}
@@ -241,6 +367,17 @@ func (p *pod) Contains(pt point) bool {
 	return pt.x >= p.x && pt.x < p.x+p.dx && pt.y >= p.y && pt.y < p.y+p.dy
 }
 
+func (p *pod) AnchorAt(pt point) *podAnchor {
+	for _, anch := range p.anchors {
+		dx := anch.edgePt.x + p.x - pt.x
+		dy := anch.edgePt.y + p.y - pt.y
+		if dx*dx+dy*dy < 100 {
+			return anch
+		}
+	}
+	return nil
+}
+
 type point struct {
 	x, y int
 }
@@ -257,8 +394,15 @@ func (p *pod) Draw(ctx *js.Object) {
 
 	ctx.Set("fillStyle", "rgb(0, 0, 0)")
 	ctx.Set("textAlign", "center")
-	ctx.Set("font", "20px Monaco")
-	ctx.Call("fillText", p.manifest.Name, p.x+p.dx/2, p.y+p.dy/2)
+	ctx.Set("font", "15px Monaco")
+	switch {
+	case p.manifest != nil:
+		ctx.Call("fillText", p.manifest.Name, p.x+p.dx/2, p.y+p.dy/2)
+	case p.disk != "":
+		ctx.Call("fillText", p.disk, p.x+p.dx/2, p.y+p.dy/2)
+	case p.port > 0:
+		ctx.Call("fillText", fmt.Sprintf("port %d", p.port), p.x+p.dx/2, p.y+p.dy/2)
+	}
 
 	for _, anchor := range p.anchors {
 		ctx.Call("fillText", anchor.text, anchor.textPt.x+p.x, anchor.textPt.y+p.y)
@@ -270,6 +414,14 @@ func (p *pod) Draw(ctx *js.Object) {
 
 func (w *Workspace) Images() chan<- schema.ImageManifest {
 	return w.images
+}
+
+func (w *Workspace) Disks() chan<- string {
+	return w.disks
+}
+
+func (w *Workspace) Ingresses() chan<- int {
+	return w.ingresses
 }
 
 func (w *Workspace) getEventPosition(e *js.Object) (x, y, cx, cy int, in bool) {
@@ -323,5 +475,24 @@ func (w *Workspace) doDraw(state *workspaceState) {
 	w.ctx.Call("clearRect", 0, 0, w.dx, w.dy)
 	for i := len(state.pods) - 1; i >= 0; i-- {
 		state.pods[i].Draw(w.ctx)
+	}
+	edges := state.edges
+	if state.connect != nil {
+		edges = append(edges, state.connect)
+	}
+	for _, e := range edges {
+		if e.complete {
+			w.ctx.Set("strokeStyle", "rgb(0, 0, 0)")
+		} else {
+			w.ctx.Set("strokeStyle", "rgb(0, 255, 0)")
+		}
+		w.ctx.Call("beginPath")
+		w.ctx.Call("moveTo", e.src.pod.x+e.src.edgePt.x, e.src.pod.y+e.src.edgePt.y)
+		if e.dst != nil {
+			w.ctx.Call("lineTo", e.dst.pod.x+e.dst.edgePt.x, e.dst.pod.y+e.dst.edgePt.y)
+		} else {
+			w.ctx.Call("lineTo", e.temp.x, e.temp.y)
+		}
+		w.ctx.Call("stroke")
 	}
 }
