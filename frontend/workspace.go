@@ -14,6 +14,7 @@ import (
 	"github.com/appc/spec/schema"
 	"github.com/appc/spec/schema/types"
 	"github.com/gopherjs/gopherjs/js"
+	"k8s.io/kubernetes/pkg/api/unversioned"
 )
 
 type Workspace struct {
@@ -207,7 +208,7 @@ func (ws *workspaceState) createService(p *pod) (*Service, error) {
 		return nil, fmt.Errorf("pod did not contain a manifest")
 	}
 	service := Service{
-		TypeMeta: TypeMeta{
+		TypeMeta: unversioned.TypeMeta{
 			APIVersion: "v1",
 			Kind:       "Service",
 		},
