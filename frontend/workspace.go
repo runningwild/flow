@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"mime/multipart"
 	"net/http"
 	"regexp"
@@ -141,56 +142,27 @@ type workspaceState struct {
 }
 
 func (ws *workspaceState) runKubectlStuff() error {
-	var serviceData []byte
+	// Create all services first
+	services := make(map[*pod]*Service)
 	for _, p := range ws.pods {
-		service, err := ws.createService(p)
+		service, err := ws.createServiceObject(p)
 		if err != nil {
 			continue
 		}
-		data, err := json.Marshal(service)
-		if err != nil {
-			return fmt.Errorf("unable to marshal service: %v", err)
-		}
-		serviceData = data
-		break
+		services[p] = service
 	}
 
-	body := bytes.NewBuffer(nil)
-	var boundary string
-	{
-		mpw := multipart.NewWriter(body)
-		mwriter, err := mpw.CreateFormFile("file", "file.json")
-		if err != nil {
-			return fmt.Errorf("unable to create multipart writer: %v", err)
-		}
-		if _, err := io.Copy(mwriter, bytes.NewBuffer(serviceData)); err != nil {
-			return fmt.Errorf("unable to write file to multipart writer: %v", err)
-		}
-		w, err := mpw.CreateFormField("cmd")
-		if err != nil {
-			return fmt.Errorf("unable to create kubeclt command to multipart writer: %v", err)
-		}
-		if _, err := io.Copy(w, bytes.NewBufferString("create -f file.json")); err != nil {
-			return fmt.Errorf("unable to write kubeclt command to multipart writer: %v", err)
-		}
-		boundary = mpw.Boundary()
-		if err := mpw.Close(); err != nil {
-			return fmt.Errorf("error closing multipart writer: %v", err)
+	log.Printf("Creating %d services", len(services))
+	for p := range services {
+		log.Printf("Service %s", p.manifest.Name)
+	}
+
+	for p, service := range services {
+		if err := ws.createService(service); err != nil {
+			return fmt.Errorf("failed to create service %s: %v", p.manifest.Name, service)
 		}
 	}
 
-	req, _ := http.NewRequest("POST", "/kubectl/", body)
-	req.Header.Set("Content-Type", fmt.Sprintf("multipart/form-data; boundary=%s", boundary))
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to run remote kubectl: %v", err)
-	}
-	rd, _ := ioutil.ReadAll(resp.Body)
-	if len(rd) >= 4 && string(rd[0:4]) == "FAIL" {
-		SetToast(ToastError, fmt.Sprintf("%s", rd))
-	} else {
-		SetToast(ToastSuccess, fmt.Sprintf("Woot: %s", rd))
-	}
 	return nil
 }
 
@@ -203,7 +175,7 @@ func makeNiceName(str string) string {
 	return str
 }
 
-func (ws *workspaceState) createService(p *pod) (*Service, error) {
+func (ws *workspaceState) createServiceObject(p *pod) (*Service, error) {
 	if p.manifest == nil {
 		return nil, fmt.Errorf("pod did not contain a manifest")
 	}
@@ -240,6 +212,51 @@ func (ws *workspaceState) createService(p *pod) (*Service, error) {
 		}
 	}
 	return &service, nil
+}
+
+func (ws *workspaceState) createService(s *Service) error {
+	serviceData, err := json.Marshal(s)
+	if err != nil {
+		return fmt.Errorf("unable to marshal Service: %v", err)
+	}
+	body := bytes.NewBuffer(nil)
+	var boundary string
+	{
+		mpw := multipart.NewWriter(body)
+		mwriter, err := mpw.CreateFormFile("file", "file.json")
+		if err != nil {
+			return fmt.Errorf("unable to create multipart writer: %v", err)
+		}
+		if _, err := io.Copy(mwriter, bytes.NewBuffer(serviceData)); err != nil {
+			return fmt.Errorf("unable to write file to multipart writer: %v", err)
+		}
+		w, err := mpw.CreateFormField("cmd")
+		if err != nil {
+			return fmt.Errorf("unable to create kubeclt command to multipart writer: %v", err)
+		}
+		if _, err := io.Copy(w, bytes.NewBufferString("create -f file.json")); err != nil {
+			return fmt.Errorf("unable to write kubeclt command to multipart writer: %v", err)
+		}
+		boundary = mpw.Boundary()
+		if err := mpw.Close(); err != nil {
+			return fmt.Errorf("error closing multipart writer: %v", err)
+		}
+	}
+
+	req, _ := http.NewRequest("POST", "/kubectl/", body)
+	req.Header.Set("Content-Type", fmt.Sprintf("multipart/form-data; boundary=%s", boundary))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to run remote kubectl: %v", err)
+	}
+	rd, _ := ioutil.ReadAll(resp.Body)
+	if len(rd) >= 4 && string(rd[0:4]) == "FAIL" {
+		SetToast(ToastError, fmt.Sprintf("%s", rd))
+	} else {
+		SetToast(ToastSuccess, fmt.Sprintf("Woot: %s", rd))
+	}
+
+	return nil
 }
 
 type edge struct {
