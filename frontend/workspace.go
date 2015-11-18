@@ -213,7 +213,7 @@ func (ws *workspaceState) createReplicationControllerObject(p *pod) (*Replicatio
 				},
 				Spec: PodSpec{
 					SecurityContext: &PodSecurityContext{
-						HostNetwork: true,
+					// HostNetwork: true,
 					},
 				},
 			},
