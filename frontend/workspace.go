@@ -1,7 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
+	"io"
+	"io/ioutil"
+	"mime/multipart"
+	"net/http"
 	"regexp"
 
 	"github.com/appc/spec/schema"
@@ -20,6 +25,7 @@ type Workspace struct {
 	mouseDown    chan point
 	mouseMove    chan point
 	mouseUp      chan point
+	makeItSo     chan struct{}
 }
 
 func MakeWorkspace(canvas *js.Object) *Workspace {
@@ -40,6 +46,7 @@ func MakeWorkspace(canvas *js.Object) *Workspace {
 		mouseDown: make(chan point),
 		mouseMove: make(chan point),
 		mouseUp:   make(chan point),
+		makeItSo:  make(chan struct{}),
 	}
 	doc.Call("addEventListener", "mousedown", js.MakeFunc(w.onMouseDown), "false")
 	doc.Call("addEventListener", "mousemove", js.MakeFunc(w.onMouseMove), "false")
@@ -113,6 +120,11 @@ func (w *Workspace) run() {
 				}
 				state.connect = nil
 			}
+
+		case <-w.makeItSo:
+			if err := state.runKubectlStuff(); err != nil {
+				SetToast(ToastError, fmt.Sprintf("Failed to bring everything up: %v", err))
+			}
 		}
 		w.doDraw(&state)
 	}
@@ -123,6 +135,46 @@ type workspaceState struct {
 	edges []*edge
 
 	connect *edge
+}
+
+func (ws *workspaceState) runKubectlStuff() error {
+	body := bytes.NewBuffer(nil)
+	var boundary string
+	{
+		mpw := multipart.NewWriter(body)
+		mwriter, err := mpw.CreateFormFile("file", "file.json")
+		if err != nil {
+			return fmt.Errorf("unable to create multipart writer: %v", err)
+		}
+		if _, err := io.Copy(mwriter, bytes.NewBuffer([]byte("THIS IS A FILE RARWRRRR"))); err != nil {
+			return fmt.Errorf("unable to write file to multipart writer: %v", err)
+		}
+		w, err := mpw.CreateFormField("cmd")
+		if err != nil {
+			return fmt.Errorf("unable to create kubeclt command to multipart writer: %v", err)
+		}
+		if _, err := io.Copy(w, bytes.NewBufferString("create -f file.json")); err != nil {
+			return fmt.Errorf("unable to write kubeclt command to multipart writer: %v", err)
+		}
+		boundary = mpw.Boundary()
+		if err := mpw.Close(); err != nil {
+			return fmt.Errorf("error closing multipart writer: %v", err)
+		}
+	}
+
+	req, _ := http.NewRequest("POST", "/kubectl/", body)
+	req.Header.Set("Content-Type", fmt.Sprintf("multipart/form-data; boundary=%s", boundary))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to run remote kubectl: %v", err)
+	}
+	rd, _ := ioutil.ReadAll(resp.Body)
+	if len(rd) >= 4 && string(rd[0:4]) == "FAIL" {
+		SetToast(ToastError, fmt.Sprintf("%s", rd))
+	} else {
+		SetToast(ToastSuccess, fmt.Sprintf("Woot: %s", rd))
+	}
+	return nil
 }
 
 type edge struct {
@@ -422,6 +474,12 @@ func (w *Workspace) Disks() chan<- string {
 
 func (w *Workspace) Ingresses() chan<- int {
 	return w.ingresses
+}
+
+func (w *Workspace) MakeItSo() {
+	go func() {
+		w.makeItSo <- struct{}{}
+	}()
 }
 
 func (w *Workspace) getEventPosition(e *js.Object) (x, y, cx, cy int, in bool) {

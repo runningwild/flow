@@ -6,34 +6,65 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"encoding/xml"
+	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/appc/spec/schema"
 )
 
+var (
+	kubectlBin = flag.String("kubectl", "/home/jwills/kubernetes/client/bin/kubectl", "Path to kubectl binary.")
+)
+
 func main() {
-	var s server
-	log.Fatal(http.ListenAndServe(":9090", &s))
+	flag.Parse()
+	if *kubectlBin == "" {
+		log.Fatalf("Must specify kubectl binary with --kubectl.")
+	}
+	log.Printf("Running kubectl from %s", *kubectlBin)
+	s := &server{
+		kubectl: *kubectlBin,
+		files:   http.FileServer(http.Dir(".")),
+	}
+	log.Printf("serving")
+	log.Fatal(http.ListenAndServe(":9090", s))
 }
 
-type server struct{}
+type server struct {
+	kubectl string
+	files   http.Handler
+	kubeMu  sync.Mutex
+}
 
 const containerPrefix = "/container/"
+const uiPrefix = "/_html/"
+const kubectlPrefix = "/kubectl/"
 
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	log.Printf("Get request: %v", r)
+	log.Printf("Get request: %v", r.URL.String())
 	w.Header().Add("Access-Control-Allow-Origin", "*")
 	switch {
 	case strings.HasPrefix(r.URL.String(), containerPrefix):
 		if err := s.handleContainer(w, r); err != nil {
 			log.Printf("Failed for: %v", err)
 		}
+
+	case strings.HasPrefix(r.URL.String(), uiPrefix):
+		s.files.ServeHTTP(w, r)
+
+	case strings.HasPrefix(r.URL.String(), kubectlPrefix):
+		s.handleKubectl(w, r)
+
 	default:
 		http.NotFound(w, r)
 		return
@@ -138,6 +169,76 @@ func (s *server) handleContainer(w http.ResponseWriter, r *http.Request) error {
 	}
 	io.Copy(w, bytes.NewBuffer(manifest))
 	return nil
+}
+
+func (s *server) handleKubectl(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseMultipartForm(10000000); err != nil {
+		fmt.Fprintf(w, "FAIL: Failed to parse multipart form: %v", err)
+		return
+	}
+
+	// Read all files
+	fileData := make(map[string][]byte)
+	for _, headers := range r.MultipartForm.File {
+		for _, header := range headers {
+			reader, err := header.Open()
+			if err != nil {
+				fmt.Fprintf(w, "FAIL: failed to open file %v: %v", header.Filename, err)
+				return
+			}
+			data, err := ioutil.ReadAll(reader)
+			if err != nil {
+				fmt.Fprintf(w, "FAIL: failed to read file %v: %v", header.Filename, err)
+				return
+			}
+			if _, ok := fileData[header.Filename]; ok {
+				fmt.Fprintf(w, "FAIL: more than one file per filename (%s) is not supported", header.Filename)
+				return
+			}
+			fileData[header.Filename] = data
+		}
+	}
+
+	s.kubeMu.Lock()
+	defer s.kubeMu.Unlock()
+
+	id := "kubeflow"
+	dir := filepath.Join(os.TempDir(), fmt.Sprintf("%s", id))
+	if err := os.MkdirAll(dir, 0777); err != nil {
+		fmt.Fprintf(w, "FAIL: failed to create temporary directory, %s, for staging files: %v", dir, err)
+		return
+	}
+	defer os.RemoveAll(dir)
+
+	pwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(w, "FAIL: unable to get pwd: %v", err)
+		return
+	}
+	if err := os.Chdir(dir); err != nil {
+		fmt.Fprintf(w, "FAIL: unable to chdir to %s: %v", dir, err)
+		return
+	}
+	defer os.Chdir(pwd)
+
+	log.Printf("Using temp dir: %v", dir)
+
+	// Write all the files
+	for name, data := range fileData {
+		if err := ioutil.WriteFile(name, data, 0777); err != nil {
+			fmt.Fprintf(w, "FAIL: failed to write temporary file %s: %v", name, err)
+			return
+		}
+	}
+
+	cmdVals := strings.Fields(r.FormValue("cmd"))
+	cmd := exec.Command(s.kubectl, cmdVals...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		fmt.Fprintf(w, "FAIL:")
+	}
+	io.Copy(w, bytes.NewBuffer(output))
+	io.Copy(os.Stdout, bytes.NewBuffer(output))
 }
 
 type xHTML struct {

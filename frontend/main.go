@@ -131,4 +131,13 @@ func main() {
 		return nil
 	}), false)
 	addIngress.Set("disabled", nil)
+
+	makeItSo := doc.Call("getElementById", "make-it-so")
+	makeItSo.Call("addEventListener", "click", js.MakeFunc(func(this *js.Object, args []*js.Object) interface{} {
+		go func() {
+			w.MakeItSo()
+		}()
+		return nil
+	}), false)
+	makeItSo.Set("disabled", nil)
 }
