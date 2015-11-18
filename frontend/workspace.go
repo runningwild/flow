@@ -163,8 +163,143 @@ func (ws *workspaceState) runKubectlStuff() error {
 		}
 	}
 
+	// Create replication controllers
+	rcs := make(map[*pod]*ReplicationController)
+	for _, p := range ws.pods {
+		rc, err := ws.createReplicationControllerObject(p)
+		if err != nil {
+			continue
+		}
+		rcs[p] = rc
+		if err := ws.createReplicationController(rc); err != nil {
+			SetToast(ToastError, fmt.Sprintf("Failed to create RC %s: %v", p.manifest.Name.String(), err))
+		}
+	}
+
+	log.Printf("Creating %d rcs", len(rcs))
+	for p := range rcs {
+		log.Printf("Service %s", p.manifest.Name)
+	}
+
+	for p, rc := range rcs {
+		if err := ws.createReplicationController(rc); err != nil {
+			return fmt.Errorf("failed to create rc %s: %v", p.manifest.Name, rc)
+		}
+	}
+
 	return nil
 }
+
+func (ws *workspaceState) createReplicationControllerObject(p *pod) (*ReplicationController, error) {
+	if p.manifest == nil {
+		return nil, fmt.Errorf("pod doesn't contain a manifest")
+	}
+	rc := ReplicationController{
+		TypeMeta: unversioned.TypeMeta{
+			APIVersion: "v1",
+			Kind:       "ReplicationController",
+		},
+		ObjectMeta: ObjectMeta{
+			Labels: map[string]string{"flow-id": makeNiceName(p.manifest.Name.String())},
+			Name:   makeNiceName(p.manifest.Name.String()),
+		},
+		Spec: ReplicationControllerSpec{
+			Replicas: 1,
+			Selector: map[string]string{"flow-id": makeNiceName(p.manifest.Name.String())},
+			Template: &PodTemplateSpec{
+				ObjectMeta: ObjectMeta{
+					Labels: map[string]string{"flow-id": makeNiceName(p.manifest.Name.String())},
+					Name:   makeNiceName(p.manifest.Name.String()),
+				},
+				Spec: PodSpec{
+					SecurityContext: &PodSecurityContext{
+						HostNetwork: true,
+					},
+				},
+			},
+		},
+	}
+
+	// This could support multiple containers per pod if we just do this part more than once.
+	rc.Spec.Template.Spec.Containers = append(rc.Spec.Template.Spec.Containers, Container{
+		Name:  makeNiceName(p.manifest.Name.String()),
+		Image: p.manifest.Name.String(),
+	})
+	spec := &rc.Spec.Template.Spec
+	container := &spec.Containers[0]
+	for _, e := range ws.edges {
+		if !e.complete {
+			continue
+		}
+		if e.src.pod == p {
+			if rf, ok := e.src.obj.(*requiredFlag); ok {
+				if _, ok := e.dst.obj.(*types.Port); ok && rf.typ == "host-port" {
+					// Find the service and use the service's host-port
+					s, err := ws.getService(makeNiceName(e.dst.pod.manifest.Name.String()))
+					if err != nil {
+						return nil, fmt.Errorf("unable to get service %q: %v", e.dst.pod.manifest.Name, err)
+					}
+					hostPort := fmt.Sprintf("--%s=%s:%d", rf.flag, s.Spec.ClusterIP, s.Spec.Ports[0].Port)
+					container.Args = append(container.Args, hostPort)
+				}
+			}
+			if mp, ok := e.src.obj.(*types.MountPoint); ok {
+				do, ok := e.dst.obj.(diskObj)
+				if !ok {
+					return nil, fmt.Errorf("MountPoint connected to an unexpected type %T", e.dst.obj)
+				}
+				spec.Volumes = append(spec.Volumes, Volume{
+					Name: string(do),
+					VolumeSource: VolumeSource{
+						GCEPersistentDisk: &GCEPersistentDiskVolumeSource{
+							PDName: string(do),
+							FSType: "ext4",
+						},
+					},
+				})
+				container.VolumeMounts = append(container.VolumeMounts, VolumeMount{
+					Name:      string(do),
+					MountPath: mp.Path,
+				})
+			}
+		}
+	}
+
+	return &rc, nil
+}
+
+func (ws *workspaceState) createReplicationController(rc *ReplicationController) error {
+	return ws.createObject(rc)
+}
+
+//       hostNetwork: true
+//       containers:
+//       - name: fetcher
+//         image: rocketpack.io/fetcher:0.0.2
+//         args:
+//         - --max-concurrent=25
+//         - --root=/images/root
+//         ports:
+//         - containerPort: 8000
+//         volumeMounts:
+//         - name: photos
+//           mountPath: /images
+//         - name: etc-resolv-conf
+//           mountPath: /etc/resolv.conf
+//         - name: etc-ssl
+//           mountPath: /etc/ssl/certs/ca-certificates.crt
+//       volumes:
+//       - name: photos
+//         gcePersistentDisk:
+//           pdName: photos
+//           fsType: ext4
+//           readOnly: false
+//       - name: etc-resolv-conf
+//         hostPath:
+//           path: /etc/resolv.conf
+//       - name: etc-ssl
+//         hostPath:
+//           path: /etc/ssl/certs/ca-certificates.crt
 
 func makeNiceName(str string) string {
 	str = strings.Replace(str, "/", "-", -1)
@@ -214,10 +349,45 @@ func (ws *workspaceState) createServiceObject(p *pod) (*Service, error) {
 	return &service, nil
 }
 
-func (ws *workspaceState) createService(s *Service) error {
-	serviceData, err := json.Marshal(s)
+func (ws *workspaceState) getService(name string) (*Service, error) {
+	body := bytes.NewBuffer(nil)
+	var boundary string
+	{
+		mpw := multipart.NewWriter(body)
+		w, err := mpw.CreateFormField("cmd")
+		if err != nil {
+			return nil, fmt.Errorf("unable to create kubeclt command to multipart writer: %v", err)
+		}
+		if _, err := io.Copy(w, bytes.NewBufferString(fmt.Sprintf("get service %s -o json", name))); err != nil {
+			return nil, fmt.Errorf("unable to write kubeclt command to multipart writer: %v", err)
+		}
+		boundary = mpw.Boundary()
+		if err := mpw.Close(); err != nil {
+			return nil, fmt.Errorf("error closing multipart writer: %v", err)
+		}
+	}
+
+	req, _ := http.NewRequest("POST", "/kubectl/", body)
+	req.Header.Set("Content-Type", fmt.Sprintf("multipart/form-data; boundary=%s", boundary))
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("unable to marshal Service: %v", err)
+		return nil, fmt.Errorf("failed to run remote kubectl: %v", err)
+	}
+	rd, _ := ioutil.ReadAll(resp.Body)
+	var s Service
+	if err := json.Unmarshal(rd, &s); err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
+func (ws *workspaceState) createService(s *Service) error {
+	return ws.createObject(s)
+}
+func (ws *workspaceState) createObject(obj interface{}) error {
+	data, err := json.Marshal(obj)
+	if err != nil {
+		return fmt.Errorf("unable to marshal object %T: %v", obj, err)
 	}
 	body := bytes.NewBuffer(nil)
 	var boundary string
@@ -227,7 +397,7 @@ func (ws *workspaceState) createService(s *Service) error {
 		if err != nil {
 			return fmt.Errorf("unable to create multipart writer: %v", err)
 		}
-		if _, err := io.Copy(mwriter, bytes.NewBuffer(serviceData)); err != nil {
+		if _, err := io.Copy(mwriter, bytes.NewBuffer(data)); err != nil {
 			return fmt.Errorf("unable to write file to multipart writer: %v", err)
 		}
 		w, err := mpw.CreateFormField("cmd")
