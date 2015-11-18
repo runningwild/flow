@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -138,6 +139,20 @@ type workspaceState struct {
 }
 
 func (ws *workspaceState) runKubectlStuff() error {
+	var serviceData []byte
+	for _, p := range ws.pods {
+		service, err := ws.createService(p)
+		if err != nil {
+			continue
+		}
+		data, err := json.Marshal(service)
+		if err != nil {
+			return fmt.Errorf("unable to marshal service: %v", err)
+		}
+		serviceData = data
+		break
+	}
+
 	body := bytes.NewBuffer(nil)
 	var boundary string
 	{
@@ -146,7 +161,7 @@ func (ws *workspaceState) runKubectlStuff() error {
 		if err != nil {
 			return fmt.Errorf("unable to create multipart writer: %v", err)
 		}
-		if _, err := io.Copy(mwriter, bytes.NewBuffer([]byte("THIS IS A FILE RARWRRRR"))); err != nil {
+		if _, err := io.Copy(mwriter, bytes.NewBuffer(serviceData)); err != nil {
 			return fmt.Errorf("unable to write file to multipart writer: %v", err)
 		}
 		w, err := mpw.CreateFormField("cmd")
@@ -175,6 +190,45 @@ func (ws *workspaceState) runKubectlStuff() error {
 		SetToast(ToastSuccess, fmt.Sprintf("Woot: %s", rd))
 	}
 	return nil
+}
+
+func (ws *workspaceState) createService(p *pod) (*Service, error) {
+	if p.manifest == nil {
+		return nil, fmt.Errorf("pod did not contain a manifest")
+	}
+	service := Service{
+		TypeMeta: TypeMeta{
+			APIVersion: "v1",
+			Kind:       "Service",
+		},
+		ObjectMeta: ObjectMeta{
+			Labels: map[string]string{"flow-id": p.manifest.Name.String()},
+			Name:   p.manifest.Name.String(),
+		},
+		Spec: ServiceSpec{
+			Selector: map[string]string{"flow-id": p.manifest.Name.String()},
+		},
+	}
+	for _, e := range ws.edges {
+		if !e.complete || e.dst.pod != p {
+			continue
+		}
+		var dst uint
+		if dstPort, ok := e.dst.obj.(*types.Port); !ok {
+			continue
+		} else {
+			dst = dstPort.Port
+		}
+		if srcPort, ok := e.src.obj.(portObj); ok {
+			service.Spec.Type = ServiceTypeLoadBalancer
+			service.Spec.Ports = append(service.Spec.Ports, ServicePort{
+				Port:       int(srcPort),
+				TargetPort: IntOrString{IntVal: int(dst), Kind: IntstrInt},
+				Protocol:   ProtocolTCP,
+			})
+		}
+	}
+	return &service, nil
 }
 
 type edge struct {
