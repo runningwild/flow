@@ -83,7 +83,7 @@ func main() {
 	containerName := doc.Call("getElementById", "container-name")
 	addContainer.Call("addEventListener", "click", js.MakeFunc(func(this *js.Object, args []*js.Object) interface{} {
 		go func() {
-			resp, err := http.Get("http://localhost:9090/container/" + containerName.Get("value").String())
+			resp, err := http.Get("/container/" + containerName.Get("value").String())
 			if err != nil {
 				SetToast(ToastError, fmt.Sprintf("Unable to contact server: %v", err))
 				return
