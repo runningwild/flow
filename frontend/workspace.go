@@ -176,16 +176,16 @@ func (ws *workspaceState) runKubectlStuff() error {
 		}
 	}
 
-	log.Printf("Creating %d rcs", len(rcs))
-	for p := range rcs {
-		log.Printf("Service %s", p.manifest.Name)
-	}
+	// log.Printf("Creating %d rcs", len(rcs))
+	// for p := range rcs {
+	// 	log.Printf("Service %s", p.manifest.Name)
+	// }
 
-	for p, rc := range rcs {
-		if err := ws.createReplicationController(rc); err != nil {
-			return fmt.Errorf("failed to create rc %s: %v", p.manifest.Name, rc)
-		}
-	}
+	// for p, rc := range rcs {
+	// 	if err := ws.createReplicationController(rc); err != nil {
+	// 		return fmt.Errorf("failed to create rc %s: %v", p.manifest.Name, rc)
+	// 	}
+	// }
 
 	return nil
 }
