@@ -1,6 +1,8 @@
 package main
 
-import "time"
+import (
+	"time"
+)
 
 type ObjectMeta struct {
 	// Name is unique within a namespace.  Name is required when creating resources, although
@@ -220,7 +222,7 @@ type ServicePort struct {
 	// is a string, it will be looked up as a named port in the target
 	// Pod's container ports.  If this is not specified, the default value
 	// is the sames as the Port field (an identity map).
-	TargetPort IntOrString `json:"targetPort"`
+	TargetPort int `json:"targetPort"`
 
 	// The port on each node on which this service is exposed.
 	// Default is to auto-allocate a port if the ServiceType of this Service requires one.
@@ -236,16 +238,3 @@ const (
 	ProtocolUDP Protocol = "UDP"
 )
 
-type IntOrString struct {
-	Kind   IntstrKind
-	IntVal int
-	StrVal string
-}
-
-// IntstrKind represents the stored type of IntOrString.
-type IntstrKind int
-
-const (
-	IntstrInt    IntstrKind = iota // The IntOrString holds an int.
-	IntstrString                   // The IntOrString holds a string.
-)

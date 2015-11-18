@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"regexp"
+	"strings"
 
 	"github.com/appc/spec/schema"
 	"github.com/appc/spec/schema/types"
@@ -192,6 +193,15 @@ func (ws *workspaceState) runKubectlStuff() error {
 	return nil
 }
 
+func makeNiceName(str string) string {
+	str = strings.Replace(str, "/", "-", -1)
+	str = strings.Replace(str, ".", "-", -1)
+	if len(str) > 24 {
+		str = str[0:24]
+	}
+	return str
+}
+
 func (ws *workspaceState) createService(p *pod) (*Service, error) {
 	if p.manifest == nil {
 		return nil, fmt.Errorf("pod did not contain a manifest")
@@ -202,11 +212,11 @@ func (ws *workspaceState) createService(p *pod) (*Service, error) {
 			Kind:       "Service",
 		},
 		ObjectMeta: ObjectMeta{
-			Labels: map[string]string{"flow-id": p.manifest.Name.String()},
-			Name:   p.manifest.Name.String(),
+			Labels: map[string]string{"flow-id": makeNiceName(p.manifest.Name.String())},
+			Name:   makeNiceName(p.manifest.Name.String()),
 		},
 		Spec: ServiceSpec{
-			Selector: map[string]string{"flow-id": p.manifest.Name.String()},
+			Selector: map[string]string{"flow-id": makeNiceName(p.manifest.Name.String())},
 		},
 	}
 	for _, e := range ws.edges {
@@ -223,7 +233,7 @@ func (ws *workspaceState) createService(p *pod) (*Service, error) {
 			service.Spec.Type = ServiceTypeLoadBalancer
 			service.Spec.Ports = append(service.Spec.Ports, ServicePort{
 				Port:       int(srcPort),
-				TargetPort: IntOrString{IntVal: int(dst), Kind: IntstrInt},
+				TargetPort: int(dst),
 				Protocol:   ProtocolTCP,
 			})
 		}

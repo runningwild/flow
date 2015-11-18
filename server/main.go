@@ -225,6 +225,8 @@ func (s *server) handleKubectl(w http.ResponseWriter, r *http.Request) {
 
 	// Write all the files
 	for name, data := range fileData {
+		log.Printf("File: %q", name)
+		log.Printf("%s", data)
 		if err := ioutil.WriteFile(name, data, 0777); err != nil {
 			fmt.Fprintf(w, "FAIL: failed to write temporary file %s: %v", name, err)
 			return
