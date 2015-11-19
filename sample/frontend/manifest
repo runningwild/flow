@@ -36,7 +36,7 @@
         ],
         "ports": [
             {
-                "name": "service",
+                "name": "http",
                 "port": 19001,
                 "protocol": "tcp"
             }
