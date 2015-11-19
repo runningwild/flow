@@ -68,16 +68,20 @@ func SetToast(id string, severity ToastSeverity, msg string) {
 
 func main() {
 	doc := js.Global.Get("document")
-	doc.Call("addEventListener", "keypress", js.MakeFunc(func(this *js.Object, args []*js.Object) interface{} {
-		if args[0].Get("keyCode").Int() == 13 {
-			args[0].Call("preventDefault")
-		}
-		return nil
-	}))
 	canvas := doc.Call("getElementById", "workspace-canvas")
 	canvas.Set("height", js.Global.Get("window").Get("innerHeight").Int()-canvas.Get("offsetTop").Int())
 	canvas.Set("width", js.Global.Get("window").Get("innerWidth").Int())
 	w := MakeWorkspace(canvas)
+
+	doc.Call("addEventListener", "keypress", js.MakeFunc(func(this *js.Object, args []*js.Object) interface{} {
+		if args[0].Get("keyCode").Int() == 13 {
+			args[0].Call("preventDefault")
+		}
+		if args[0].Get("keyCode").Int() == 'x' {
+			w.Cut()
+		}
+		return nil
+	}))
 
 	addContainer := doc.Call("getElementById", "add-container")
 	containerName := doc.Call("getElementById", "container-name")

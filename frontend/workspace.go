@@ -31,6 +31,7 @@ type Workspace struct {
 	mouseMove    chan point
 	mouseUp      chan point
 	makeItSo     chan struct{}
+	cut          chan struct{}
 }
 
 func MakeWorkspace(canvas *js.Object) *Workspace {
@@ -52,6 +53,7 @@ func MakeWorkspace(canvas *js.Object) *Workspace {
 		mouseMove: make(chan point),
 		mouseUp:   make(chan point),
 		makeItSo:  make(chan struct{}),
+		cut:       make(chan struct{}),
 	}
 	doc.Call("addEventListener", "mousedown", js.MakeFunc(w.onMouseDown), "false")
 	doc.Call("addEventListener", "mousemove", js.MakeFunc(w.onMouseMove), "false")
@@ -140,6 +142,22 @@ func (w *Workspace) run() {
 					}
 				}
 				state.connect = nil
+			}
+
+		case <-w.cut:
+			if len(state.pods) > 0 && state.pods[0].selected {
+				var keep []*edge
+				for _, e := range state.edges {
+					if e.src != nil && e.src.pod == state.pods[0] {
+						continue
+					}
+					if e.dst != nil && e.dst.pod == state.pods[0] {
+						continue
+					}
+					keep = append(keep, e)
+				}
+				state.edges = keep
+				state.pods = state.pods[1:]
 			}
 
 		case <-w.makeItSo:
@@ -729,6 +747,12 @@ func (w *Workspace) Ingresses() chan<- int {
 func (w *Workspace) MakeItSo() {
 	go func() {
 		w.makeItSo <- struct{}{}
+	}()
+}
+
+func (w *Workspace) Cut() {
+	go func() {
+		w.cut <- struct{}{}
 	}()
 }
 
