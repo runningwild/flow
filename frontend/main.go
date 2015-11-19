@@ -27,8 +27,8 @@ const (
 	ToastError
 )
 
-func SetToast(severity ToastSeverity, msg string) {
-	toaster := js.Global.Get("document").Call("getElementById", "toaster")
+func SetToast(id string, severity ToastSeverity, msg string) {
+	toaster := js.Global.Get("document").Call("getElementById", id)
 	if toaster == nil {
 		js.Global.Call("alert", "No toaster")
 		return
@@ -54,7 +54,7 @@ func SetToast(severity ToastSeverity, msg string) {
 	lastToastMu.Unlock()
 
 	go func() {
-		time.Sleep(5 * time.Second)
+		time.Sleep(15 * time.Second)
 		lastToastMu.Lock()
 		subverted := now != lastToast
 		lastToastMu.Unlock()
@@ -85,17 +85,17 @@ func main() {
 		go func() {
 			resp, err := http.Get("/container/" + containerName.Get("value").String())
 			if err != nil {
-				SetToast(ToastError, fmt.Sprintf("Unable to contact server: %v", err))
+				SetToast("toaster", ToastError, fmt.Sprintf("Unable to contact server: %v", err))
 				return
 			}
 			data, err := ioutil.ReadAll(resp.Body)
 			if err != nil {
-				SetToast(ToastError, fmt.Sprintf("Unable to parse response from server: %v", err))
+				SetToast("toaster", ToastError, fmt.Sprintf("Unable to parse response from server: %v", err))
 				return
 			}
 			var manifest schema.ImageManifest
 			if err := json.Unmarshal(data, &manifest); err != nil {
-				SetToast(ToastError, fmt.Sprintf("Unable to parse response from server: %v", err))
+				SetToast("toaster", ToastError, fmt.Sprintf("Unable to parse response from server: %v", err))
 				return
 			}
 			w.Images() <- manifest
@@ -122,7 +122,7 @@ func main() {
 		str := containerName.Get("value").String()
 		n, err := strconv.ParseInt(str, 10, 32)
 		if err != nil || n <= 0 {
-			SetToast(ToastError, fmt.Sprintf("Unable to parse %q as a positive integer", str))
+			SetToast("toaster", ToastError, fmt.Sprintf("Unable to parse %q as a positive integer", str))
 			return nil
 		}
 		go func() {

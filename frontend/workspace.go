@@ -95,6 +95,17 @@ func (w *Workspace) run() {
 					}
 					state.pods = pods
 					state.pods[0].Click(pt)
+					go func() {
+						s, err := state.getService(makeNiceName(state.pods[0].manifest.Name.String()))
+						if err != nil {
+							return
+						}
+						ingress := s.Status.LoadBalancer.Ingress
+						ports := s.Spec.Ports
+						if len(ingress) > 0 && len(ports) > 0 {
+							SetToast("service-info", ToastSuccess, fmt.Sprintf("%s:%s", ingress[0].IP, ports[0].Port))
+						}
+					}()
 					break
 				}
 			}
@@ -128,7 +139,7 @@ func (w *Workspace) run() {
 
 		case <-w.makeItSo:
 			if err := state.runKubectlStuff(); err != nil {
-				SetToast(ToastError, fmt.Sprintf("Failed to bring everything up: %v", err))
+				SetToast("toaster", ToastError, fmt.Sprintf("Failed to bring everything up: %v", err))
 			}
 		}
 		w.doDraw(&state)
@@ -173,20 +184,9 @@ func (ws *workspaceState) runKubectlStuff() error {
 		}
 		rcs[p] = rc
 		if err := ws.createReplicationController(rc); err != nil {
-			SetToast(ToastError, fmt.Sprintf("Failed to create RC %s: %v", p.manifest.Name.String(), err))
+			SetToast("toaster", ToastError, fmt.Sprintf("Failed to create RC %s: %v", p.manifest.Name.String(), err))
 		}
 	}
-
-	// log.Printf("Creating %d rcs", len(rcs))
-	// for p := range rcs {
-	// 	log.Printf("Service %s", p.manifest.Name)
-	// }
-
-	// for p, rc := range rcs {
-	// 	if err := ws.createReplicationController(rc); err != nil {
-	// 		return fmt.Errorf("failed to create rc %s: %v", p.manifest.Name, rc)
-	// 	}
-	// }
 
 	return nil
 }
@@ -272,35 +272,6 @@ func (ws *workspaceState) createReplicationControllerObject(p *pod) (*Replicatio
 func (ws *workspaceState) createReplicationController(rc *ReplicationController) error {
 	return ws.createObject(rc)
 }
-
-//       hostNetwork: true
-//       containers:
-//       - name: fetcher
-//         image: rocketpack.io/fetcher:0.0.2
-//         args:
-//         - --max-concurrent=25
-//         - --root=/images/root
-//         ports:
-//         - containerPort: 8000
-//         volumeMounts:
-//         - name: photos
-//           mountPath: /images
-//         - name: etc-resolv-conf
-//           mountPath: /etc/resolv.conf
-//         - name: etc-ssl
-//           mountPath: /etc/ssl/certs/ca-certificates.crt
-//       volumes:
-//       - name: photos
-//         gcePersistentDisk:
-//           pdName: photos
-//           fsType: ext4
-//           readOnly: false
-//       - name: etc-resolv-conf
-//         hostPath:
-//           path: /etc/resolv.conf
-//       - name: etc-ssl
-//         hostPath:
-//           path: /etc/ssl/certs/ca-certificates.crt
 
 func makeNiceName(str string) string {
 	str = strings.Replace(str, "/", "-", -1)
@@ -440,9 +411,9 @@ func (ws *workspaceState) createObject(obj interface{}) error {
 	}
 	rd, _ := ioutil.ReadAll(resp.Body)
 	if len(rd) >= 4 && string(rd[0:4]) == "FAIL" {
-		SetToast(ToastError, fmt.Sprintf("%s", rd))
+		SetToast("toaster", ToastError, fmt.Sprintf("%s", rd))
 	} else {
-		SetToast(ToastSuccess, fmt.Sprintf("Woot: %s", rd))
+		SetToast("toaster", ToastSuccess, fmt.Sprintf("Woot: %s", rd))
 	}
 
 	return nil
@@ -531,7 +502,7 @@ func annotationToRequiredFlag(ann types.Annotation) *requiredFlag {
 		return nil
 	}
 	if value[2] != "host-port" {
-		SetToast(ToastError, fmt.Sprintf("Unknown required-flag type %q", value[2]))
+		SetToast("toaster", ToastError, fmt.Sprintf("Unknown required-flag type %q", value[2]))
 		return nil
 	}
 	return &requiredFlag{
