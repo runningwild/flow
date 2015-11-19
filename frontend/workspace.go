@@ -472,6 +472,9 @@ func (e *edge) Check() error {
 	if e.src == nil || e.dst == nil {
 		return fmt.Errorf("edge is unconnected")
 	}
+	if e.src == e.dst {
+		return fmt.Errorf("no self-edges")
+	}
 
 	if rf, ok := e.src.obj.(*requiredFlag); ok {
 		if rf.typ == "host-port" {
