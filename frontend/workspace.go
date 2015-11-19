@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/appc/spec/schema"
 	"github.com/appc/spec/schema/types"
@@ -97,20 +98,6 @@ func (w *Workspace) run() {
 					}
 					state.pods = pods
 					state.pods[0].Click(pt)
-					go func(p *pod) {
-						if p.manifest == nil {
-							return
-						}
-						s, err := state.getService(makeNiceName(p.manifest.Name.String()))
-						if err != nil {
-							return
-						}
-						ingress := s.Status.LoadBalancer.Ingress
-						ports := s.Spec.Ports
-						if len(ingress) > 0 && len(ports) > 0 {
-							SetToast("service-info", ToastSuccess, fmt.Sprintf("%s:%d", ingress[0].IP, ports[0].Port))
-						}
-					}(state.pods[0])
 					break
 				}
 			}
@@ -125,6 +112,36 @@ func (w *Workspace) run() {
 
 		case pt := <-w.mouseUp:
 			if len(state.pods) > 0 && state.pods[0].selected {
+				if time.Since(state.pods[0].selectTime) < 500*time.Millisecond && state.pods[0].drag.x == 0 && state.pods[0].drag.y == 0 {
+					// This is a click!
+					if state.pods[0].port > 0 {
+						var e *edge
+						for _, ed := range state.edges {
+							if ed.complete && ed.src.pod == state.pods[0] {
+								e = ed
+								break
+							}
+						}
+						if e != nil {
+							go func(p *pod) {
+								if p.manifest == nil {
+									return
+								}
+								s, err := state.getService(makeNiceName(p.manifest.Name.String()))
+								if err != nil {
+									return
+								}
+								ingress := s.Status.LoadBalancer.Ingress
+								ports := s.Spec.Ports
+								if len(ingress) > 0 && len(ports) > 0 {
+									js.Global.Get("window").Call("open", fmt.Sprintf("%s:%d", ingress[0].IP, ports[0].Port))
+								} else {
+									SetToast("toaster", ToastWarning, "External load balancer isn't ready yet.")
+								}
+							}(e.dst.pod)
+						}
+					}
+				}
 				state.pods[0].Release(pt)
 			}
 			if state.connect != nil {
@@ -486,6 +503,7 @@ type pod struct {
 	port     int
 
 	selected     bool
+	selectTime   time.Time
 	x, y, dx, dy int
 
 	anchors []*podAnchor
@@ -670,6 +688,7 @@ func (p *pod) Click(pt point) {
 	p.drag = pt
 	p.origin = point{p.x, p.y}
 	p.selected = true
+	p.selectTime = time.Now()
 }
 
 func (p *pod) Move(pt point) {
