@@ -95,8 +95,11 @@ func (w *Workspace) run() {
 					}
 					state.pods = pods
 					state.pods[0].Click(pt)
-					go func() {
-						s, err := state.getService(makeNiceName(state.pods[0].manifest.Name.String()))
+					go func(p *pod) {
+						if p.manifest == nil {
+							return
+						}
+						s, err := state.getService(makeNiceName(p.manifest.Name.String()))
 						if err != nil {
 							return
 						}
@@ -105,7 +108,7 @@ func (w *Workspace) run() {
 						if len(ingress) > 0 && len(ports) > 0 {
 							SetToast("service-info", ToastSuccess, fmt.Sprintf("%s:%d", ingress[0].IP, ports[0].Port))
 						}
-					}()
+					}(state.pods[0])
 					break
 				}
 			}
