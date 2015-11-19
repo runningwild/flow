@@ -332,8 +332,12 @@ func (ws *workspaceState) createServiceObject(p *pod) (*Service, error) {
 			Selector: map[string]string{"flow-id": makeNiceName(p.manifest.Name.String())},
 		},
 	}
+	usedAnchors := make(map[*podAnchor]bool)
 	for _, e := range ws.edges {
 		if !e.complete || e.dst.pod != p {
+			continue
+		}
+		if usedAnchors[e.dst] {
 			continue
 		}
 		var dst uint
@@ -342,6 +346,7 @@ func (ws *workspaceState) createServiceObject(p *pod) (*Service, error) {
 		} else {
 			dst = dstPort.Port
 		}
+		log.Printf("Checking edge with src of type %T", e.src.obj)
 		if srcPort, ok := e.src.obj.(portObj); ok {
 			service.Spec.Type = ServiceTypeLoadBalancer
 			service.Spec.Ports = append(service.Spec.Ports, ServicePort{
@@ -349,6 +354,7 @@ func (ws *workspaceState) createServiceObject(p *pod) (*Service, error) {
 				TargetPort: int(dst),
 				Protocol:   ProtocolTCP,
 			})
+			usedAnchors[e.dst] = true
 		}
 		if rf, ok := e.src.obj.(*requiredFlag); ok && rf.typ == "host-port" {
 			service.Spec.Ports = append(service.Spec.Ports, ServicePort{
@@ -356,6 +362,7 @@ func (ws *workspaceState) createServiceObject(p *pod) (*Service, error) {
 				TargetPort: int(dst),
 				Protocol:   ProtocolTCP,
 			})
+			usedAnchors[e.dst] = true
 		}
 	}
 	return &service, nil
