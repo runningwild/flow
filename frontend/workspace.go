@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"mime/multipart"
 	"net/http"
 	"regexp"
@@ -310,6 +311,10 @@ func makeNiceName(str string) string {
 	return str
 }
 
+func randoport() int {
+	return rand.Intn(10000) + 10000
+}
+
 func (ws *workspaceState) createServiceObject(p *pod) (*Service, error) {
 	if p.manifest == nil {
 		return nil, fmt.Errorf("pod did not contain a manifest")
@@ -341,6 +346,13 @@ func (ws *workspaceState) createServiceObject(p *pod) (*Service, error) {
 			service.Spec.Type = ServiceTypeLoadBalancer
 			service.Spec.Ports = append(service.Spec.Ports, ServicePort{
 				Port:       int(srcPort),
+				TargetPort: int(dst),
+				Protocol:   ProtocolTCP,
+			})
+		}
+		if rf, ok := e.src.obj.(*requiredFlag); ok && rf.typ == "host-port" {
+			service.Spec.Ports = append(service.Spec.Ports, ServicePort{
+				Port:       randoport(),
 				TargetPort: int(dst),
 				Protocol:   ProtocolTCP,
 			})
