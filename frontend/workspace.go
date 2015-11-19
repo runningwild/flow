@@ -112,7 +112,7 @@ func (w *Workspace) run() {
 
 		case pt := <-w.mouseUp:
 			if len(state.pods) > 0 && state.pods[0].selected {
-				if time.Since(state.pods[0].selectTime) < 500*time.Millisecond && state.pods[0].drag.x == 0 && state.pods[0].drag.y == 0 {
+				if time.Since(state.pods[0].selectTime) < 500*time.Millisecond && state.pods[0].drag.x == pt.x && state.pods[0].drag.y == pt.y {
 					// This is a click!
 					if state.pods[0].port > 0 {
 						var e *edge
