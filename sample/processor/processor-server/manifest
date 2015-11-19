@@ -32,7 +32,6 @@
         "group": "root",
         "exec": [
             "/bin/processor-server",
-            "--db=/db/processor",
             "--port=19000"
         ],
         "ports": [
