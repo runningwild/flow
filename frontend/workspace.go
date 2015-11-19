@@ -728,7 +728,16 @@ func (p *pod) Draw(ctx *js.Object) {
 		ctx.Set("fillStyle", "rgb(0, 0, 0)")
 	}
 	ctx.Call("fillRect", p.x, p.y, p.dx, p.dy)
-	ctx.Set("fillStyle", "rgb(255, 255, 255)")
+	switch {
+	case p.disk != "":
+		ctx.Set("fillStyle", "rgb(225, 225, 225)")
+	case p.port != 0:
+		ctx.Set("fillStyle", "rgb(195, 240, 215)")
+	case p.manifest != nil:
+		ctx.Set("fillStyle", "rgb(220, 220, 240)")
+	default:
+		ctx.Set("fillStyle", "rgb(255, 0, 0)")
+	}
 	ctx.Call("fillRect", p.x+1, p.y+1, p.dx-2, p.dy-2)
 
 	ctx.Set("fillStyle", "rgb(0, 0, 0)")
