@@ -134,7 +134,7 @@ func (w *Workspace) run() {
 								ingress := s.Status.LoadBalancer.Ingress
 								ports := s.Spec.Ports
 								if len(ingress) > 0 && len(ports) > 0 {
-									js.Global.Get("window").Call("open", fmt.Sprintf("%s:%d", ingress[0].IP, ports[0].Port))
+									js.Global.Get("window").Call("open", fmt.Sprintf("http://%s:%d", ingress[0].IP, ports[0].Port))
 								} else {
 									SetToast("toaster", ToastWarning, "External load balancer isn't ready yet.")
 								}
