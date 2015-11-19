@@ -103,7 +103,7 @@ func (w *Workspace) run() {
 						ingress := s.Status.LoadBalancer.Ingress
 						ports := s.Spec.Ports
 						if len(ingress) > 0 && len(ports) > 0 {
-							SetToast("service-info", ToastSuccess, fmt.Sprintf("%s:%s", ingress[0].IP, ports[0].Port))
+							SetToast("service-info", ToastSuccess, fmt.Sprintf("%s:%d", ingress[0].IP, ports[0].Port))
 						}
 					}()
 					break
