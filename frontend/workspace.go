@@ -131,7 +131,9 @@ func (w *Workspace) run() {
 					if anch != nil {
 						state.connect.dst = anch
 						state.connect.complete = true
-						if state.connect.Valid() {
+						if err := state.connect.Check(); err != nil {
+							SetToast("toaster", ToastWarning, err.Error())
+						} else {
 							state.edges = append(state.edges, state.connect)
 						}
 						break
@@ -428,32 +430,35 @@ type edge struct {
 	complete bool
 }
 
-func (e *edge) Valid() bool {
+func (e *edge) Check() error {
 	if !e.complete {
-		return false
+		return fmt.Errorf("edge is incomplete")
 	}
 	if e.src == nil || e.dst == nil {
-		return false
+		return fmt.Errorf("edge is unconnected")
 	}
 
 	if rf, ok := e.src.obj.(*requiredFlag); ok {
 		if rf.typ == "host-port" {
-			_, ok := e.dst.obj.(*types.Port)
-			return ok
+			if _, ok := e.dst.obj.(*types.Port); ok {
+				return nil
+			}
 		}
 	}
 
 	if _, ok := e.src.obj.(portObj); ok {
-		_, ok := e.dst.obj.(*types.Port)
-		return ok
+		if _, ok := e.dst.obj.(*types.Port); ok {
+			return nil
+		}
 	}
 
 	if _, ok := e.src.obj.(*types.MountPoint); ok {
-		_, ok := e.dst.obj.(diskObj)
-		return ok
+		if _, ok := e.dst.obj.(diskObj); ok {
+			return nil
+		}
 	}
 
-	return false
+	return fmt.Errorf("cannot connect a %T to a %T", e.src.obj, e.dst.obj)
 }
 
 type pod struct {
