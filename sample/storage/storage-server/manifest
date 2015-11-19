@@ -31,7 +31,7 @@
         "user": "root",
         "group": "root",
         "exec": [
-            "/bin/storage",
+            "/bin/storage-server",
             "--db=/db/storage",
             "--port=19000"
         ],

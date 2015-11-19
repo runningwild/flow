@@ -223,7 +223,7 @@ func (ws *workspaceState) createReplicationControllerObject(p *pod) (*Replicatio
 	// This could support multiple containers per pod if we just do this part more than once.
 	rc.Spec.Template.Spec.Containers = append(rc.Spec.Template.Spec.Containers, Container{
 		Name:  makeNiceName(p.manifest.Name.String()),
-		Image: p.manifest.Name.String(),
+		Image: p.manifest.Name.String() + ":0.0.1",
 	})
 	spec := &rc.Spec.Template.Spec
 	container := &spec.Containers[0]
