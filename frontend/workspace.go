@@ -253,9 +253,9 @@ func (ws *workspaceState) createReplicationControllerObject(p *pod) (*Replicatio
 					Name:   makeNiceName(p.manifest.Name.String()),
 				},
 				Spec: PodSpec{
-					SecurityContext: &PodSecurityContext{
-					// HostNetwork: true,
-					},
+				// SecurityContext: &PodSecurityContext{
+				// // HostNetwork: true,
+				// },
 				},
 			},
 		},
